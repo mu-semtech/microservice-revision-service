@@ -1,9 +1,19 @@
 # Microservice Revision Service
-
 Fetches images (revisions) from docker hub for all mu.semte.ch images in the triple store.
 
+## Code Flow
+This service will
+  1. get all core microservices
+     connect to the triple store and get all mu:Microservice objects
+     that have a dct:title and are ext:isCoreMicroservice.
+  2. get the first 100 revisions for every microservice
+     For this we use a library called docker-hub-api. This library sports
+     a function called tags(user, service, options). This function returns
+     all tags for a given service
+  3. store each found revision in the triple store
+
 ## set the revision fetching in motion
-make a GET call on:
+make a POST call on:
 ```
 /update-revisions
 ```
