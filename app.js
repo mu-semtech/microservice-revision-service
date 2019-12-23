@@ -13,6 +13,9 @@ import { app, query, errorHandler, uuid } from 'mu';
 // docker hub api is a library that let's me pull info of hub.docker.com easily
 let dockerHubAPI = require('docker-hub-api');
 
+// sync request will allow us to make synchronous requests while also supporting https
+let request = require('sync-request');
+
 // the mu semtech user that will be use in the tags(user, service, options) calls
 const dockerHubUser = "semtech";
 
@@ -24,11 +27,14 @@ app.post('/update-revisions', function( req, res ) {
     PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
     PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
     PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-    SELECT ?service ?title
+    SELECT ?service ?title ?uuid ?repository ?gitRepository
     WHERE {
       GRAPH <http://mu.semte.ch/application> {
         ?service a mu:Microservice ;
+              mu:uuid ?uuid ;
               dct:title ?title ;
+              ext:repository ?repository ;
+              ext:gitRepository ?gitRepository ;
               ext:isCoreMicroservice "true"^^xsd:boolean .
       }
     }`;
@@ -38,10 +44,14 @@ app.post('/update-revisions', function( req, res ) {
             const services = response["results"]["bindings"].map(function(responseObject) {
                 return({
                     "service": responseObject["service"]["value"],
-                    "title": responseObject["title"]["value"]
+                    "title": responseObject["title"]["value"],
+                    "uuid": responseObject["uuid"]["value"],
+                    "repository": responseObject["repository"]["value"],
+                    "gitRepository": responseObject["gitRepository"]["value"]
                 });
             });
             updateRevisionsForServices(services);
+            updateMetaInfoForServices(services);
             res.status(204).send();
         })
         .catch( function(err) {
@@ -159,6 +169,169 @@ async function getRevisionUUIDFromTripleStore(service, revision) {
         return results["results"]["bindings"][0]["uuid"]["value"];
     }
     return undefined;
+}
+
+// META PART
+// TODO: document...
+async function updateMetaInfoForServices(services) {
+    services.forEach(function(service, index) {
+        console.log("updating meta info for service: ");
+        console.log(service);
+        deleteMetaInfoForService(service);
+        service = augmentServiceWithMetaInfo(service);
+        updateMetaInfoForService(service);
+    });
+};
+
+async function deleteMetaInfoForService(service) {
+    let deleteQuery = `
+    PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+    PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
+    DELETE {
+      GRAPH <http://mu.semte.ch/application> {
+       ?service ext:composeSnippet ?composeSnippet;
+                ext:creationSnippet ?creationSnippet;
+                ext:developmentSnippet ?developmentSnippet .
+      }
+    }
+    WHERE {
+      GRAPH <http://mu.semte.ch/application> {
+        ?service a mu:Microservice ;
+              mu:uuid "${service["uuid"]}" ;
+              ext:composeSnippet ?composeSnippet;
+              ext:creationSnippet ?creationSnippet;
+              ext:developmentSnippet ?developmentSnippet .
+      }
+    }`;
+    await query( deleteQuery );
+}
+
+async function updateMetaInfoForService(service) {
+    let insertQuery = `
+    PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+    PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
+    INSERT {
+      GRAPH <http://mu.semte.ch/application> {
+          ?service ext:composeSnippet "${service["composeSnippet"]}" ;
+                ext:creationSnippet "${service["creationSnippet"]}" ;
+                ext:developmentSnippet "${service["developmentSnippet"]}" .
+      }
+    }
+    WHERE {
+      GRAPH <http://mu.semte.ch/application> {
+        ?service a mu:Microservice ;
+              mu:uuid "${service["uuid"]}".
+      }
+    }`;
+    await query( insertQuery );
+
+    let deleteCommandsQuery = `
+    PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+    PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
+    DELETE {
+      GRAPH <http://mu.semte.ch/application> {
+       ?service ext:hasCommand ?command .
+       ?command ?p ?o .
+      }
+    }
+    WHERE {
+      GRAPH <http://mu.semte.ch/application> {
+        ?service a mu:Microservice ;
+              mu:uuid "${service["uuid"]}" ;
+              ext:hasCommand ?command .
+      }
+    }`;
+    await query( deleteCommandsQuery );
+
+    for(let commandIndex in service["commands"])
+    {
+        let cmd = service["commands"][commandIndex];
+        let commandUUID = uuid();
+        let insertCommandQuery = `
+    PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+    PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
+    PREFIX dct: <http://purl.org/dc/terms/>
+    INSERT {
+      GRAPH <http://mu.semte.ch/application> {
+          ?service ext:hasCommand <http://info.mu.semte.ch/microservice-commands/${commandUUID}> .
+          <http://info.mu.semte.ch/microservice-commands/${commandUUID}> a mu:MicroserviceCommand;
+                mu:uuid "${commandUUID}" ;
+                ext:commandTitle "${cmd["title"]}" ;
+                ext:shellCommand "${cmd["shellCommand"]}" ;
+                dct:description "${cmd["description"]}" .
+      }
+    }
+    WHERE {
+      GRAPH <http://mu.semte.ch/application> {
+        ?service a mu:Microservice ;
+              mu:uuid "${service["uuid"]}".
+      }
+    }`;
+        await query( insertCommandQuery );
+    }
+
+}
+
+function escape(text)
+{
+    return text.trim().split("\n").join("\\n").split("\"").join("\\\"");
+}
+
+function commandArrayFromCommandText(service, commandText)
+{
+    let commands = [];
+    commandText = commandText.trim();
+    if(commandText.length <= 0) {
+        return commands;
+    }
+    let lines = commandText.split("\n");
+    for(let lineIndex in lines) {
+        let commandParts = lines[lineIndex].split(",");
+        commands.push({
+            "title": escape(commandParts[0]),
+            "shellCommand": escape(commandParts[1]),
+            "description": escape(commandParts[2]),
+            "service": service["uuid"]
+        });
+    }
+    return commands;
+}
+
+function augmentServiceWithMetaInfo(service) {
+    const baseUrl = service["gitRepository"].replace("https://github.com/", "https://raw.githubusercontent.com/");
+    const commandsUrl = baseUrl + "/wip/commands";
+    const composeSnippetUrl = baseUrl + "/wip/compose-snippet";
+    const creationSnippetUrl = baseUrl + "/wip/creation-snippet";
+    const developmentSnippetUrl = baseUrl + "/wip/development-snippet";
+
+    service["commands"] = commandArrayFromCommandText(service, makeHTTPRequestOrUseDefault(commandsUrl, ""));
+    service["composeSnippet"] = escape(makeHTTPRequestOrUseDefault(composeSnippetUrl, defaultDockerComposeSnippet()));
+    service["creationSnippet"] = escape(makeHTTPRequestOrUseDefault(creationSnippetUrl, defaultCreationSnippet()));
+    service["developmentSnippet"] = escape(makeHTTPRequestOrUseDefault(developmentSnippetUrl, defaultDevelopmentSnippet()));
+
+    console.log(service);
+    return service;
+}
+
+function makeHTTPRequestOrUseDefault(url, defaultResponse) {
+    try {
+        var res = request('GET', url);
+        return res.getBody().toString();
+    } catch (error) {
+        return defaultResponse;
+    }
+}
+
+function defaultDockerComposeSnippet() {
+    return 'image: semtech/mu-javascript-template:1.3.5 \nlinks: \n  - db:database \nports: \n  - \"8888:80\" \n  - \"9229:9229\" \nenvironment: \n  NODE_ENV: \"development\" \nvolumes: \n  - \"/tmp/tmp/test-js/:/app\"';
+}
+
+function defaultCreationSnippet() {
+    return 'image: semtech/mu-javascript-template:1.3.5 \nlinks: \n  - db:database \nports: \n  - \"8888:80\" \n  - \"9229:9229\" \nenvironment: \n  NODE_ENV: \"development\" \nvolumes: \n  - \"/tmp/tmp/test-js/:/app\"';
+}
+
+function defaultDevelopmentSnippet() {
+    return 'image: semtech/mu-javascript-template:1.3.5 \nlinks: \n  - db:database \nports: \n  - \"8888:80\" \n  - \"9229:9229\" \nenvironment: \n  NODE_ENV: \"development\" \nvolumes: \n  - \"/tmp/tmp/test-js/:/app\"';
 }
 
 app.use(errorHandler);
