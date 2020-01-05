@@ -210,17 +210,11 @@ async function updateMetaInfoForService(service) {
     let insertQuery = `
     PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
     PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
-    INSERT {
+    INSERT DATA {
       GRAPH <http://mu.semte.ch/application> {
-          ?service ext:composeSnippet "${service["composeSnippet"]}" ;
+          <${cmd["service"]} ext:composeSnippet "${service["composeSnippet"]}" ;
                 ext:creationSnippet "${service["creationSnippet"]}" ;
                 ext:developmentSnippet "${service["developmentSnippet"]}" .
-      }
-    }
-    WHERE {
-      GRAPH <http://mu.semte.ch/application> {
-        ?service a mu:Microservice ;
-              mu:uuid "${service["uuid"]}".
       }
     }`;
     await query( insertQuery );
@@ -251,20 +245,14 @@ async function updateMetaInfoForService(service) {
     PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
     PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
     PREFIX dct: <http://purl.org/dc/terms/>
-    INSERT {
+    INSERT DATA {
       GRAPH <http://mu.semte.ch/application> {
-          ?service ext:hasCommand <http://info.mu.semte.ch/microservice-commands/${commandUUID}> .
+          <${cmd["service"]} ext:hasCommand <http://info.mu.semte.ch/microservice-commands/${commandUUID}> .
           <http://info.mu.semte.ch/microservice-commands/${commandUUID}> a mu:MicroserviceCommand;
                 mu:uuid "${commandUUID}" ;
                 ext:commandTitle "${cmd["title"]}" ;
                 ext:shellCommand "${cmd["shellCommand"]}" ;
                 dct:description "${cmd["description"]}" .
-      }
-    }
-    WHERE {
-      GRAPH <http://mu.semte.ch/application> {
-        ?service a mu:Microservice ;
-              mu:uuid "${service["uuid"]}".
       }
     }`;
         await query( insertCommandQuery );
@@ -291,7 +279,7 @@ function commandArrayFromCommandText(service, commandText)
             "title": escape(commandParts[0]),
             "shellCommand": escape(commandParts[1]),
             "description": escape(commandParts[2]),
-            "service": service["uuid"]
+            "service": service["service"]
         });
     }
     return commands;
