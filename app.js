@@ -30,7 +30,7 @@ app.post('/update-revisions', function( req, res ) {
     SELECT ?service ?title ?uuid ?repository ?gitRepository
     WHERE {
       GRAPH <http://mu.semte.ch/application> {
-        ?service a mu:Microservice ;
+        ?service a ext:Microservice ;
               mu:uuid ?uuid ;
               dct:title ?title ;
               ext:repository ?repository ;
@@ -116,7 +116,7 @@ function getRevisionInsertQuery(revision) {
     PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
     INSERT DATA {
       GRAPH <http://mu.semte.ch/application> {
-        <http://info.mu.semte.ch/microservice-revisions/${revision["id"]}> a mu:MicroserviceRevision ;
+        <http://info.mu.semte.ch/microservice-revisions/${revision["id"]}> a ext:MicroserviceRevision ;
               mu:uuid "${revision["id"]}" ;
               ext:microserviceRevision "${revision["image"]}" ;
               ext:microserviceVersion "${revision["version"]}" .
@@ -157,7 +157,7 @@ async function getRevisionUUIDFromTripleStore(service, revision) {
     SELECT ?uuid
     WHERE {
       GRAPH <http://mu.semte.ch/application> {
-        ?revision a mu:MicroserviceRevision ;
+        ?revision a ext:MicroserviceRevision ;
               mu:uuid ?uuid ;
               ext:microserviceRevision "${dockerHubUser}/${service["title"]}" ;
               ext:microserviceVersion "${revision}" .
@@ -196,7 +196,7 @@ async function deleteMetaInfoForService(service) {
     }
     WHERE {
       GRAPH <http://mu.semte.ch/application> {
-        ?service a mu:Microservice ;
+        ?service a ext:Microservice ;
               mu:uuid "${service["uuid"]}" ;
               ext:composeSnippet ?composeSnippet;
               ext:creationSnippet ?creationSnippet;
@@ -230,7 +230,7 @@ async function updateMetaInfoForService(service) {
     }
     WHERE {
       GRAPH <http://mu.semte.ch/application> {
-        ?service a mu:Microservice ;
+        ?service a ext:Microservice ;
               mu:uuid "${service["uuid"]}" ;
               ext:hasCommand ?command .
       }
@@ -248,7 +248,7 @@ async function updateMetaInfoForService(service) {
     INSERT DATA {
       GRAPH <http://mu.semte.ch/application> {
           <${cmd["service"]} ext:hasCommand <http://info.mu.semte.ch/microservice-commands/${commandUUID}> .
-          <http://info.mu.semte.ch/microservice-commands/${commandUUID}> a mu:MicroserviceCommand;
+          <http://info.mu.semte.ch/microservice-commands/${commandUUID}> a ext:MicroserviceCommand;
                 mu:uuid "${commandUUID}" ;
                 ext:commandTitle "${cmd["title"]}" ;
                 ext:shellCommand "${cmd["shellCommand"]}" ;
